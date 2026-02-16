@@ -1,0 +1,46 @@
+{
+  "name": "backend",
+  "module": "src/index.ts",
+  "type": "module",
+  "private": true,
+  "prisma": {
+    "seed": "bun prisma/seed.ts"
+  },
+  "scripts": {
+    "dev": "bun run --hot src/index.ts",
+    "start": "bun run src/index.ts",
+    "studio": "cloud-studio --port 3001 --hostname 0.0.0.0",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "test:e2e": "bun test tests/e2e",
+    "db:push": "bunx prisma db push",
+    "db:migrate": "bunx prisma migrate deploy",
+    "db:generate": "bunx prisma generate"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/ioredis": "^5.0.0",
+    "prettier": "^3.8.1",
+    "prisma": "^6.0.0",
+    "typescript": "5.8.3"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.974.0",
+    "@aws-sdk/client-sesv2": "^3.990.0",
+    "@aws-sdk/s3-request-presigner": "^3.974.0",
+    "@google/generative-ai": "^0.24.1",
+    "@hono/node-server": "^1.19.9",
+    "@hono/zod-validator": "^0.7.6",
+    "@mozilla/readability": "^0.6.0",
+    "@paralleldrive/cuid2": "^3.0.6",
+    "@prisma/client": "^6.0.0",
+    "@types/sharp": "^0.32.0",
+    "better-auth": "^1.4.16",
+    "hono": "^4.11.5",
+    "ioredis": "^5.9.2",
+    "linkedom": "^0.18.12",
+    "sharp": "^0.34.5",
+    "stripe": "^20.2.0",
+    "zod": "4.1.11"
+  }
+}

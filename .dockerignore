@@ -1,0 +1,12 @@
+node_modules
+.env
+.env.*
+!.env.example
+*.db
+*.db-journal
+.DS_Store
+.git
+.gitignore
+README.md
+tasks
+.ralph-tui

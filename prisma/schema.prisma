@@ -1,0 +1,610 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============ Auth Models (Better Auth) ============
+
+model User {
+  id            String    @id
+  name          String
+  email         String    @unique
+  emailVerified Boolean   @default(false)
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  sessions      Session[]
+  accounts      Account[]
+
+  // Payment provider customer ID (Stripe customer ID or RevenueCat app_user_id)
+  paymentCustomerId String? @unique
+
+  // Style learning
+  writingBaseline String? // JSON: aggregated writing preferences across all templates
+
+  // Milkly relations
+  streams      Stream[]
+  newsletters  Newsletter[]
+  templates    Template[]
+  subscription Subscription?
+  usageRecords UsageRecord[]
+  mediaFiles   MediaFile[]
+
+  @@index([email])
+  @@index([paymentCustomerId])
+  @@index([createdAt])
+}
+
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  token     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([userId, expiresAt])
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([providerId, accountId])
+  @@index([userId, providerId])
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@index([expiresAt])
+}
+
+// ============ Milkly Models ============
+
+model Category {
+  id          String   @id @default(cuid())
+  slug        String   @unique // e.g., "news", "videos", "social", "custom"
+  label       String // Display name, e.g., "News", "Videos", "Social Media"
+  description String?
+  icon        String? // Icon identifier (e.g., "newspaper", "video", "message")
+  color       String? // Hex color code or color name
+  isSystem    Boolean  @default(false) // System categories cannot be deleted
+  order       Int      @default(0) // Display order
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([slug])
+  @@index([isSystem])
+  @@index([order])
+}
+
+model SortOption {
+  id          String   @id @default(cuid())
+  slug        String   @unique // e.g., "date", "relevancy", "popularity"
+  label       String // Display name
+  description String?
+  isSystem    Boolean  @default(false)
+  order       Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([slug])
+  @@index([order])
+}
+
+model SubscriptionTier {
+  id          String   @id @default(cuid())
+  slug        String   @unique // e.g., "essential", "professional", "mastery"
+  label       String // Display name
+  description String?
+  features    String // JSON object of features and limits
+  price       String? // JSON object with pricing info
+  isSystem    Boolean  @default(false)
+  isActive    Boolean  @default(true)
+  order       Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([slug])
+  @@index([isActive])
+  @@index([order])
+}
+
+model Stream {
+  id                     String    @id @default(cuid())
+  name                   String
+  description            String?
+  categories             String // JSON array of category slugs: ["news", "videos", "social"]
+  keywords               String? // JSON array of search keywords: ["AI", "machine learning", "ChatGPT"]
+  sortPreference         String    @default("relevancy") // "date", "relevancy", or "popularity"
+  lastMilkedAt           DateTime? // When the stream was last milked globally (for "Last Milk" filter)
+  lastBatchId            String? // DEPRECATED: Use lastBatchIdsByCategory instead
+  lastBatchIdsByCategory String? // JSON object mapping category to batchId: {"news": "batch1", "videos": "batch2"}
+  userId                 String
+  user                   User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+  deletedAt              DateTime? // Soft delete
+
+  contentItems ContentItem[]
+  templates    Template[]
+  newsletters  Newsletter[]
+  fetchHistory StreamFetchHistory[]
+
+  // Indexes for common query patterns
+  @@index([userId, deletedAt, updatedAt])
+  @@index([userId, deletedAt, lastMilkedAt])
+  @@index([id, userId]) // Ownership check pattern
+  @@map("Topic")
+}
+
+model ContentItem {
+  id           String    @id @default(cuid())
+  title        String
+  url          String
+  description  String?
+  imageUrl     String?
+  source       String // e.g., "techcrunch", "youtube", "twitter"
+  category     String // "news", "videos", "social"
+  author       String?
+  publishedAt  DateTime?
+  metadata     String? // JSON for extra data (views, likes, etc.)
+  streamId     String
+  stream       Stream    @relation(fields: [streamId], references: [id], onDelete: Cascade)
+  createdAt    DateTime  @default(now())
+  batchId      String? // Identifier for which refresh batch this item came from
+  fetchedAt    DateTime  @default(now()) // When this item was fetched/refreshed
+  isCustomItem Boolean   @default(false) // true for manually created items, false for fetched items
+  deletedAt    DateTime? // Soft delete
+
+  // Editing support for API-fetched items
+  isEdited            Boolean @default(false) // true if user edited this item
+  originalTitle       String? // Original title before editing
+  originalDescription String? // Original description before editing
+  originalImageUrl    String? // Original image URL before editing
+  originalAuthor      String? // Original author before editing
+
+  // Track if item was selected for a newsletter
+  newsletterItems       NewsletterItem[]
+  linkedNewsletterItems LinkedNewsletterItem[]
+
+  // Indexes for common query patterns
+  @@index([streamId, category, deletedAt, fetchedAt])
+  @@index([batchId, deletedAt])
+  @@index([streamId, deletedAt, fetchedAt])
+  @@index([streamId, isCustomItem, deletedAt])
+  @@index([streamId, publishedAt])
+}
+
+model Template {
+  id             String    @id @default(cuid())
+  name           String
+  mklySource     String // mkly document source
+  logoUrl        String?
+  styleProfile   String? // JSON: learned style profile from published editions
+  newsletterType String? // "tech", "digest", "brand", "b2b", "personal", "educational"
+  streamId       String?
+  stream         Stream?   @relation(fields: [streamId], references: [id], onDelete: Cascade)
+  userId         String? // Direct user ownership for global templates
+  user           User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  isGlobal       Boolean   @default(false) // true for global templates, false for stream-specific
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime? // Soft delete
+
+  newsletters Newsletter[]
+
+  @@index([streamId, isActive, deletedAt])
+  @@index([streamId, deletedAt])
+  @@index([userId, isGlobal, deletedAt])
+}
+
+model Newsletter {
+  id               String    @id @default(cuid())
+  title            String
+  content          String // Rendered HTML/markdown content
+  generatedContent String? // AI-generated HTML before user edits (for edit-diff tracking)
+  blocksJson       Json? // BlockNote blocks array for faster editor loading
+  status           String    @default("draft") // "draft", "published"
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  streamId    String?
+  stream      Stream?   @relation(fields: [streamId], references: [id], onDelete: SetNull)
+  streamName  String?
+  templateId   String?
+  template     Template? @relation(fields: [templateId], references: [id])
+  templateName String?
+  publishedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime? // Soft delete
+
+  items       NewsletterItem[]
+  subscribers NewsletterSubscriber[]
+  versions    NewsletterVersion[]
+
+  @@index([userId, status, deletedAt, updatedAt])
+  @@index([userId, deletedAt, publishedAt])
+  @@index([streamId, status, deletedAt])
+  @@index([id, userId]) // Ownership check pattern
+}
+
+model NewsletterVersion {
+  id           String     @id @default(cuid())
+  newsletterId String
+  newsletter   Newsletter @relation(fields: [newsletterId], references: [id], onDelete: Cascade)
+  content      String? // HTML content at this version
+  blocksJson   Json? // BlockNote blocks at this version
+  createdAt    DateTime   @default(now())
+
+  @@index([newsletterId, createdAt])
+}
+
+model NewsletterItem {
+  id            String       @id @default(cuid())
+  newsletterId  String
+  newsletter    Newsletter   @relation(fields: [newsletterId], references: [id], onDelete: Cascade)
+  contentItemId String? // Made nullable for soft delete support
+  contentItem   ContentItem? @relation(fields: [contentItemId], references: [id], onDelete: SetNull)
+  note          String? // User's note/commentary on this item
+  order         Int          @default(0)
+  createdAt     DateTime     @default(now())
+  deletedAt     DateTime? // Soft delete
+
+  // Preserved fields for when original item is soft deleted
+  preservedTitle       String?
+  preservedUrl         String?
+  preservedDescription String?
+  preservedImageUrl    String?
+  preservedSource      String?
+  preservedCategory    String?
+
+  @@index([newsletterId, order, deletedAt])
+  @@index([contentItemId, deletedAt])
+}
+
+// Track last fetch timestamps per stream per category to avoid duplicate fetches
+model StreamFetchHistory {
+  id          String   @id @default(cuid())
+  streamId    String
+  stream      Stream   @relation(fields: [streamId], references: [id], onDelete: Cascade)
+  category    String // "news", "videos", "social"
+  lastFetchAt DateTime @default(now())
+
+  @@unique([streamId, category], map: "StreamFetchHistory_streamId_category_key")
+  @@index([streamId, lastFetchAt], map: "StreamFetchHistory_streamId_lastFetchAt_idx")
+  @@map("TopicFetchHistory")
+}
+
+// ============ Linked Streams Models ============
+
+model LinkedStream {
+  id                     String    @id @default(cuid())
+  name                   String
+  description            String?
+  userId                 String
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+  deletedAt              DateTime? // Soft delete
+  lastMilkedAt           DateTime? // When the linked stream was last milked globally
+  lastBatchIds           String? // DEPRECATED: Use lastBatchIdsByCategory instead
+  lastBatchIdsByCategory String? // JSON object mapping category to array of batchIds: {"news": ["b1"], "videos": ["b2", "b3"]}
+
+  // Relations
+  members     LinkedStreamMember[]
+  newsletters LinkedNewsletter[]
+  templates   LinkedStreamTemplate[]
+  customItems LinkedStreamCustomItem[]
+
+  @@index([userId, deletedAt, updatedAt])
+  @@index([userId, deletedAt, lastMilkedAt])
+  @@index([id, userId]) // Ownership check pattern
+}
+
+model LinkedStreamMember {
+  id             String       @id @default(cuid())
+  linkedStreamId String
+  linkedStream   LinkedStream @relation(fields: [linkedStreamId], references: [id], onDelete: Cascade)
+  streamId       String
+  order          Int          @default(0)
+  createdAt      DateTime     @default(now())
+
+  @@unique([linkedStreamId, streamId], map: "LinkedStreamMember_linkedStreamId_streamId_key")
+  @@index([linkedStreamId])
+  @@index([streamId], map: "LinkedStreamMember_streamId_idx")
+  @@map("LinkedStreamTopic")
+}
+
+model LinkedStreamTemplate {
+  id             String       @id @default(cuid())
+  name           String
+  mklySource     String // mkly document source
+  logoUrl        String?
+  styleProfile   String? // JSON: learned style profile from published editions
+  linkedStreamId String
+  linkedStream   LinkedStream @relation(fields: [linkedStreamId], references: [id], onDelete: Cascade)
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  deletedAt      DateTime? // Soft delete
+
+  newsletters LinkedNewsletter[]
+
+  @@index([linkedStreamId, isActive, deletedAt])
+  @@index([linkedStreamId, deletedAt])
+}
+
+model LinkedStreamCustomItem {
+  id             String       @id @default(cuid())
+  title          String
+  url            String?
+  description    String?
+  imageUrl       String?
+  source         String       @default("custom")
+  category       String       @default("custom")
+  author         String?
+  publishedAt    DateTime?
+  metadata       String?
+  linkedStreamId String
+  linkedStream   LinkedStream @relation(fields: [linkedStreamId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+  fetchedAt      DateTime     @default(now())
+  deletedAt      DateTime? // Soft delete
+
+  // Editing support
+  isEdited            Boolean @default(false) // true if user edited this item
+  originalTitle       String? // Original title before editing
+  originalDescription String? // Original description before editing
+  originalImageUrl    String? // Original image URL before editing
+  originalAuthor      String? // Original author before editing
+
+  newsletterItems LinkedNewsletterItem[]
+
+  // Indexes for common query patterns
+  @@index([linkedStreamId, category, deletedAt, fetchedAt])
+  @@index([linkedStreamId, deletedAt, fetchedAt])
+}
+
+model LinkedNewsletter {
+  id               String                @id @default(cuid())
+  title            String
+  content          String // Rendered HTML/markdown content
+  generatedContent String? // AI-generated HTML before user edits (for edit-diff tracking)
+  status           String                @default("draft") // "draft", "published"
+  linkedStreamId   String
+  linkedStream     LinkedStream          @relation(fields: [linkedStreamId], references: [id], onDelete: Cascade)
+  linkedStreamName String? // Preserve name after deletion
+  templateId       String?
+  template         LinkedStreamTemplate? @relation(fields: [templateId], references: [id])
+  templateName     String?
+  publishedAt      DateTime?
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+  deletedAt        DateTime? // Soft delete
+
+  items LinkedNewsletterItem[]
+
+  @@index([linkedStreamId, status, deletedAt, updatedAt])
+  @@index([linkedStreamId, deletedAt, publishedAt])
+}
+
+model LinkedNewsletterItem {
+  id                       String                  @id @default(cuid())
+  linkedNewsletterId       String
+  linkedNewsletter         LinkedNewsletter        @relation(fields: [linkedNewsletterId], references: [id], onDelete: Cascade)
+  contentItemId            String? // From stream (nullable for custom items or soft delete)
+  contentItem              ContentItem?            @relation(fields: [contentItemId], references: [id], onDelete: SetNull)
+  linkedStreamCustomItemId String? // From linked stream custom items
+  linkedStreamCustomItem   LinkedStreamCustomItem? @relation(fields: [linkedStreamCustomItemId], references: [id], onDelete: SetNull)
+  sourceStreamId           String?
+  note                     String? // User's note/commentary
+  order                    Int                     @default(0)
+  createdAt                DateTime                @default(now())
+  deletedAt                DateTime? // Soft delete
+
+  // Preserved fields for when original item is soft deleted
+  preservedTitle       String?
+  preservedUrl         String?
+  preservedDescription String?
+  preservedImageUrl    String?
+  preservedSource      String?
+  preservedCategory    String?
+
+  @@index([linkedNewsletterId, order, deletedAt])
+  @@index([contentItemId, deletedAt])
+  @@index([linkedStreamCustomItemId, deletedAt])
+}
+
+model LinkedStreamSubscriber {
+  id               String    @id @default(cuid())
+  email            String
+  linkedStreamId   String
+  unsubscribeToken String    @unique @default(cuid())
+  confirmed        Boolean   @default(true)
+  createdAt        DateTime  @default(now())
+  deletedAt        DateTime? // Soft delete
+
+  @@unique([email, linkedStreamId])
+  @@index([linkedStreamId])
+}
+
+// ============ Subscription Models ============
+
+model Subscription {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  tier   String @default("essential") // essential, professional, mastery
+  status String @default("active") // active, canceled, past_due, trialing, paused
+
+  // Payment provider (stripe, revenuecat)
+  provider String?
+
+  // Provider subscription/transaction ID
+  providerSubscriptionId String? @unique
+  providerPriceId        String?
+
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+  cancelAtPeriodEnd  Boolean   @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  snapshots SubscriptionSnapshot[]
+
+  @@index([userId, tier, status])
+  @@index([status, currentPeriodEnd])
+  @@index([provider, providerSubscriptionId])
+}
+
+model UsageRecord {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  periodStart   DateTime
+  periodEnd     DateTime
+  aiCreditsUsed Int      @default(0)
+  refreshesUsed Int      @default(0)
+  createdAt     DateTime @default(now())
+
+  @@unique([userId, periodStart])
+  @@index([userId])
+}
+
+model SubscriptionSnapshot {
+  id             String       @id @default(cuid())
+  subscriptionId String
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  tier                String // "essential", "professional", "mastery"
+  maxStreams          Int
+  aiCredits           Int
+  refreshes           Int
+  maxEmailSubscribers Int
+  maxStorageMB        Int
+  linkedStreams       Boolean
+  allowedCategories   String // JSON array string
+
+  periodStart DateTime
+  periodEnd   DateTime
+  createdAt   DateTime @default(now())
+
+  @@index([subscriptionId, periodStart])
+  @@index([subscriptionId, periodEnd])
+}
+
+model SystemSettings {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  value       String
+  description String?
+  updatedAt   DateTime @updatedAt
+
+  @@index([key])
+}
+
+// ============ Newsletter Subscriber Models ============
+
+model NewsletterSubscriber {
+  id               String     @id @default(cuid())
+  email            String
+  newsletterId     String
+  newsletter       Newsletter @relation(fields: [newsletterId], references: [id], onDelete: Cascade)
+  unsubscribeToken String     @unique @default(cuid())
+  confirmed        Boolean    @default(true) // Can be set to false for double opt-in
+  createdAt        DateTime   @default(now())
+  deletedAt        DateTime? // Soft delete
+
+  @@unique([email, newsletterId])
+  @@index([newsletterId])
+  @@index([newsletterId, confirmed, deletedAt])
+  @@index([email, deletedAt])
+}
+
+model StreamSubscriber {
+  id               String    @id @default(cuid())
+  email            String
+  streamId         String
+  unsubscribeToken String    @unique @default(cuid())
+  confirmed        Boolean   @default(true)
+  createdAt        DateTime  @default(now())
+  deletedAt        DateTime? // Soft delete
+
+  @@unique([email, streamId], map: "StreamSubscriber_email_streamId_key")
+  @@index([streamId], map: "StreamSubscriber_streamId_idx")
+  @@index([streamId, confirmed, deletedAt], map: "StreamSubscriber_streamId_confirmed_deletedAt_idx")
+  @@index([email, deletedAt])
+  @@map("TopicSubscriber")
+}
+
+// ============ Media Library Models ============
+
+model MediaFile {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  filename  String
+  key       String  @unique
+  publicKey String?
+  mimeType  String
+  sizeBytes Int
+  width     Int?
+  height    Int?
+
+  isLogo Boolean @default(false)
+  tags   String  @default("[]")
+
+  extractedColors String @default("[]")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([userId, isLogo])
+  @@index([id, userId]) // Ownership check pattern
+  @@index([userId, createdAt]) // Ordered listing pattern
+}
+
+// ============ Tier Configuration Models ============
+
+model TierConfig {
+  id        String   @id @default(cuid())
+  tier      String   @unique // "essential" | "professional" | "mastery"
+  features  Json     // Array of feature strings for pricing display
+  updatedAt DateTime @updatedAt
+}
