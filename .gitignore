@@ -39,3 +39,10 @@ server.log
 /prisma/dev.db*
 
 .env
+
+# Local tooling artifacts
+.memsearch/
+.playwright-mcp/
+playwright-report/
+test-results/
+.last-run.json
